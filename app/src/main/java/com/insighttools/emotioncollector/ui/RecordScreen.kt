@@ -1,13 +1,24 @@
 package com.insighttools.emotioncollector.ui
 
 import android.Manifest
-import android.app.Activity
-import android.content.Intent
+import android.content.Context
+import android.content.pm.PackageManager
 import android.os.Build
-import android.provider.MediaStore
 import android.widget.VideoView
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.camera.core.CameraSelector
+import androidx.camera.core.Preview
+import androidx.camera.lifecycle.ProcessCameraProvider
+import androidx.camera.video.FallbackStrategy
+import androidx.camera.video.FileOutputOptions
+import androidx.camera.video.Quality
+import androidx.camera.video.QualitySelector
+import androidx.camera.video.Recorder
+import androidx.camera.video.Recording
+import androidx.camera.video.VideoCapture
+import androidx.camera.video.VideoRecordEvent
+import androidx.camera.view.PreviewView
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -28,9 +39,10 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
@@ -42,8 +54,8 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
-import androidx.core.content.FileProvider
 import androidx.core.net.toUri
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import coil.ImageLoader
 import coil.compose.AsyncImage
 import coil.decode.GifDecoder
@@ -62,7 +74,10 @@ fun RecordScreen(
     recordingStore: RecordingStore,
 ) {
     val context = LocalContext.current
+    val lifecycleOwner = LocalLifecycleOwner.current
     val coroutineScope = rememberCoroutineScope()
+    val mainExecutor = remember(context) { ContextCompat.getMainExecutor(context) }
+    val cameraProviderFuture = remember(context) { ProcessCameraProvider.getInstance(context) }
 
     val imageLoader = remember {
         ImageLoader.Builder(context)
@@ -77,63 +92,165 @@ fun RecordScreen(
     }
 
     var currentPrompt by remember { mutableStateOf(promptRepository.getRandomPrompt()) }
-    var pendingCaptureFile by remember { mutableStateOf<File?>(null) }
+    var permissionsGranted by remember { mutableStateOf(hasRequiredPermissions(context)) }
+    var previewView by remember { mutableStateOf<PreviewView?>(null) }
+    var videoCapture by remember { mutableStateOf<VideoCapture<Recorder>?>(null) }
+    var activeRecording by remember { mutableStateOf<Recording?>(null) }
+    var isRecording by remember { mutableStateOf(false) }
     var capturedVideoFile by remember { mutableStateOf<File?>(null) }
     var score by remember { mutableFloatStateOf(5f) }
     var saving by remember { mutableStateOf(false) }
     var status by remember { mutableStateOf<String?>(null) }
 
-    val captureLauncher =
-        rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
-            val captureFile = pendingCaptureFile
-            if (result.resultCode == Activity.RESULT_OK && captureFile != null && captureFile.exists()) {
-                capturedVideoFile = captureFile
-                status = "录制完成，请预览并打分。"
-            } else {
-                captureFile?.delete()
-                status = "录制已取消。"
-            }
-            pendingCaptureFile = null
-        }
-
-    fun launchRecorder() {
-        capturedVideoFile?.delete()
-        capturedVideoFile = null
-        val captureFile = File(context.cacheDir, "capture_${System.currentTimeMillis()}.mp4")
-        pendingCaptureFile = captureFile
-        captureLauncher.launch(openFrontCameraIntent(context, captureFile))
-    }
-
     val permissionLauncher =
         rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { grants ->
-            val allGranted = grants[Manifest.permission.CAMERA] == true &&
+            permissionsGranted = grants[Manifest.permission.CAMERA] == true &&
                 grants[Manifest.permission.RECORD_AUDIO] == true
-            if (allGranted) {
-                launchRecorder()
-            } else {
+            if (!permissionsGranted) {
                 status = "需要相机和录音权限才能录制。"
             }
         }
 
-    fun ensurePermissionsAndLaunch() {
-        val cameraGranted = ContextCompat.checkSelfPermission(
-            context,
-            Manifest.permission.CAMERA,
-        ) == android.content.pm.PackageManager.PERMISSION_GRANTED
-        val audioGranted = ContextCompat.checkSelfPermission(
-            context,
-            Manifest.permission.RECORD_AUDIO,
-        ) == android.content.pm.PackageManager.PERMISSION_GRANTED
-        if (cameraGranted && audioGranted) {
-            launchRecorder()
+    DisposableEffect(previewView, permissionsGranted, lifecycleOwner) {
+        val currentPreviewView = previewView
+        if (!permissionsGranted || currentPreviewView == null) {
+            onDispose { }
         } else {
-            permissionLauncher.launch(
-                arrayOf(
-                    Manifest.permission.CAMERA,
-                    Manifest.permission.RECORD_AUDIO,
-                ),
+            var disposed = false
+            cameraProviderFuture.addListener(
+                {
+                    val cameraProvider = kotlin.runCatching { cameraProviderFuture.get() }.getOrNull()
+                    if (cameraProvider == null) {
+                        if (!disposed) {
+                            status = "相机初始化失败。"
+                        }
+                        return@addListener
+                    }
+
+                    val preview = Preview.Builder().build().also {
+                        it.surfaceProvider = currentPreviewView.surfaceProvider
+                    }
+                    val recorder = Recorder.Builder()
+                        .setQualitySelector(
+                            QualitySelector.from(
+                                Quality.FHD,
+                                FallbackStrategy.lowerQualityOrHigherThan(Quality.SD),
+                            ),
+                        )
+                        .build()
+                    val capture = VideoCapture.withOutput(recorder)
+
+                    try {
+                        cameraProvider.unbindAll()
+                        cameraProvider.bindToLifecycle(
+                            lifecycleOwner,
+                            CameraSelector.DEFAULT_FRONT_CAMERA,
+                            preview,
+                            capture,
+                        )
+                        videoCapture = capture
+                        if (!disposed && status == null) {
+                            status = "前摄已就绪。"
+                        }
+                    } catch (_: Exception) {
+                        try {
+                            cameraProvider.unbindAll()
+                            cameraProvider.bindToLifecycle(
+                                lifecycleOwner,
+                                CameraSelector.DEFAULT_BACK_CAMERA,
+                                preview,
+                                capture,
+                            )
+                            videoCapture = capture
+                            if (!disposed) {
+                                status = "前摄不可用，已切换后摄。"
+                            }
+                        } catch (fallbackError: Exception) {
+                            videoCapture = null
+                            if (!disposed) {
+                                status = "相机绑定失败：${fallbackError.message}"
+                            }
+                        }
+                    }
+                },
+                mainExecutor,
             )
+
+            onDispose {
+                disposed = true
+                activeRecording?.stop()
+                activeRecording = null
+                isRecording = false
+                videoCapture = null
+                if (cameraProviderFuture.isDone) {
+                    kotlin.runCatching {
+                        cameraProviderFuture.get().unbindAll()
+                    }
+                }
+            }
         }
+    }
+
+    fun requestPermissions() {
+        permissionLauncher.launch(
+            arrayOf(
+                Manifest.permission.CAMERA,
+                Manifest.permission.RECORD_AUDIO,
+            ),
+        )
+    }
+
+    fun startRecordingWithCameraX() {
+        permissionsGranted = hasRequiredPermissions(context)
+        if (!permissionsGranted) {
+            requestPermissions()
+            return
+        }
+
+        val capture = videoCapture
+        if (capture == null) {
+            status = "相机还在初始化，请稍后重试。"
+            return
+        }
+
+        capturedVideoFile?.delete()
+        capturedVideoFile = null
+        val captureFile = File(context.cacheDir, "capture_${System.currentTimeMillis()}.mp4")
+        val outputOptions = FileOutputOptions.Builder(captureFile).build()
+        var pendingRecording = capture.output.prepareRecording(context, outputOptions)
+        if (ContextCompat.checkSelfPermission(
+                context,
+                Manifest.permission.RECORD_AUDIO,
+            ) == PackageManager.PERMISSION_GRANTED
+        ) {
+            pendingRecording = pendingRecording.withAudioEnabled()
+        }
+
+        isRecording = true
+        status = "录制中，点击“停止录制”结束。"
+        activeRecording = pendingRecording.start(mainExecutor) { event ->
+            when (event) {
+                is VideoRecordEvent.Start -> {
+                    status = "录制中，点击“停止录制”结束。"
+                }
+
+                is VideoRecordEvent.Finalize -> {
+                    activeRecording = null
+                    isRecording = false
+                    if (event.hasError()) {
+                        captureFile.delete()
+                        status = "录制失败：错误码 ${event.error}"
+                    } else {
+                        capturedVideoFile = captureFile
+                        status = "录制完成，请预览并打分。"
+                    }
+                }
+            }
+        }
+    }
+
+    fun stopRecordingWithCameraX() {
+        activeRecording?.stop()
     }
 
     Column(
@@ -196,12 +313,67 @@ fun RecordScreen(
             }
         }
 
+        Text(
+            text = "前摄实时预览",
+            style = MaterialTheme.typography.titleMedium,
+        )
+
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            colors = CardDefaults.cardColors(
+                containerColor = Color(0xFFF8F7FF),
+            ),
+        ) {
+            if (permissionsGranted) {
+                AndroidView(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(240.dp),
+                    factory = { viewContext ->
+                        PreviewView(viewContext).apply {
+                            scaleType = PreviewView.ScaleType.FILL_CENTER
+                            implementationMode = PreviewView.ImplementationMode.COMPATIBLE
+                            previewView = this
+                        }
+                    },
+                    update = {
+                        previewView = it
+                    },
+                )
+            } else {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(240.dp)
+                        .background(Color(0xFFE3E3E3)),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text("请先授权相机和麦克风。")
+                }
+            }
+        }
+
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Button(
-                onClick = { ensurePermissionsAndLaunch() },
-                enabled = !saving,
-            ) {
-                Text("打开前摄录制")
+            if (isRecording) {
+                Button(
+                    onClick = { stopRecordingWithCameraX() },
+                    enabled = !saving,
+                ) {
+                    Text("停止录制")
+                }
+            } else {
+                Button(
+                    onClick = {
+                        if (permissionsGranted) {
+                            startRecordingWithCameraX()
+                        } else {
+                            requestPermissions()
+                        }
+                    },
+                    enabled = !saving,
+                ) {
+                    Text("开始录制")
+                }
             }
             OutlinedButton(
                 onClick = {
@@ -211,7 +383,7 @@ fun RecordScreen(
                     currentPrompt = promptRepository.getRandomPrompt()
                     status = "已切换到下一条随机素材。"
                 },
-                enabled = !saving,
+                enabled = !saving && !isRecording,
             ) {
                 Text("换一个素材")
             }
@@ -247,7 +419,7 @@ fun RecordScreen(
                 onValueChange = { score = it },
                 valueRange = 0f..10f,
                 steps = 9,
-                enabled = !saving,
+                enabled = !saving && !isRecording,
             )
 
             Button(
@@ -273,13 +445,13 @@ fun RecordScreen(
                         }
                     }
                 },
-                enabled = !saving,
+                enabled = !saving && !isRecording,
             ) {
                 Text("确认保存并下一条")
             }
         }
 
-        if (saving) {
+        if (saving || isRecording) {
             LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
         }
 
@@ -293,18 +465,13 @@ fun RecordScreen(
     }
 }
 
-private fun openFrontCameraIntent(context: android.content.Context, videoFile: File): Intent {
-    val captureUri = FileProvider.getUriForFile(
+private fun hasRequiredPermissions(context: Context): Boolean {
+    return ContextCompat.checkSelfPermission(
         context,
-        "${context.packageName}.fileprovider",
-        videoFile,
-    )
-    return Intent(MediaStore.ACTION_VIDEO_CAPTURE).apply {
-        putExtra(MediaStore.EXTRA_OUTPUT, captureUri)
-        putExtra(MediaStore.EXTRA_DURATION_LIMIT, 30)
-        putExtra(MediaStore.EXTRA_VIDEO_QUALITY, 1)
-        putExtra("android.intent.extras.CAMERA_FACING", 1)
-        putExtra("android.intent.extra.USE_FRONT_CAMERA", true)
-        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
-    }
+        Manifest.permission.CAMERA,
+    ) == PackageManager.PERMISSION_GRANTED &&
+        ContextCompat.checkSelfPermission(
+            context,
+            Manifest.permission.RECORD_AUDIO,
+        ) == PackageManager.PERMISSION_GRANTED
 }

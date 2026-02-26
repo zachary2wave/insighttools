@@ -19,16 +19,11 @@
      - `recordedvedio`
      - `score`
 
-3. **上传模式**
+3. **分享模式**
    - 浏览已录制样本，可预览视频。
    - 支持单选 / 全选。
-   - 上传时将 **json + video** 一起以 multipart/form-data POST 到固定接口。
-
-## 关键配置
-
-- 上传地址在 `app/src/main/java/com/insighttools/emotioncollector/AppConfig.kt`：
-  - `UPLOAD_URL = "https://example.com/api/upload"`
-  - 请改为你的真实后端地址。
+   - 点击“打包并分享”后，将所选记录的 **json + video** 一并打包为 zip。
+   - 打包完成后拉起系统分享面板，可转发到微信或其他应用。
 
 ## Assets 目录规范
 

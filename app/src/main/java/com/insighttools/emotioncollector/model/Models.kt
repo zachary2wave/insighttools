@@ -16,5 +16,4 @@ data class RecordingItem(
     val score: Int,
     val videoFile: File,
     val metadataFile: File,
-    val uploaded: Boolean,
 )

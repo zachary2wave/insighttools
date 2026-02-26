@@ -32,7 +32,6 @@ class RecordingStore(context: Context) {
             put("score", score)
             put("category", prompt.category)
             put("memeFolder", prompt.memeFolder)
-            put("uploaded", false)
             put("createdAt", System.currentTimeMillis())
         }
         metadataFile.writeText(json.toString(2))
@@ -44,7 +43,6 @@ class RecordingStore(context: Context) {
             score = score,
             videoFile = videoFile,
             metadataFile = metadataFile,
-            uploaded = false,
         )
     }
 
@@ -55,13 +53,6 @@ class RecordingStore(context: Context) {
             .sortedByDescending { it.lastModified() }
 
         return files.mapNotNull { parseMetadata(it) }
-    }
-
-    fun markUploaded(item: RecordingItem) {
-        val json = JSONObject(item.metadataFile.readText())
-        json.put("uploaded", true)
-        json.put("uploadedAt", System.currentTimeMillis())
-        item.metadataFile.writeText(json.toString(2))
     }
 
     private fun parseMetadata(metadataFile: File): RecordingItem? {
@@ -77,7 +68,6 @@ class RecordingStore(context: Context) {
                 score = json.optInt("score", 0),
                 videoFile = videoFile,
                 metadataFile = metadataFile,
-                uploaded = json.optBoolean("uploaded", false),
             )
         } catch (_: Exception) {
             null

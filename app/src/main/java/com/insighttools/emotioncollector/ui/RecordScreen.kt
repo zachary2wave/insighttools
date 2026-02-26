@@ -2,7 +2,6 @@ package com.insighttools.emotioncollector.ui
 
 import android.Manifest
 import android.app.Activity
-import android.content.Context
 import android.content.Intent
 import android.os.Build
 import android.provider.MediaStore
@@ -98,23 +97,11 @@ fun RecordScreen(
         }
 
     fun launchRecorder() {
+        capturedVideoFile?.delete()
+        capturedVideoFile = null
         val captureFile = File(context.cacheDir, "capture_${System.currentTimeMillis()}.mp4")
-        val captureUri = FileProvider.getUriForFile(
-            context,
-            "${context.packageName}.fileprovider",
-            captureFile,
-        )
         pendingCaptureFile = captureFile
-        captureLauncher.launch(
-            Intent(MediaStore.ACTION_VIDEO_CAPTURE).apply {
-                putExtra(MediaStore.EXTRA_OUTPUT, captureUri)
-                putExtra(MediaStore.EXTRA_DURATION_LIMIT, 30)
-                putExtra(MediaStore.EXTRA_VIDEO_QUALITY, 1)
-                putExtra("android.intent.extras.CAMERA_FACING", 1)
-                putExtra("android.intent.extra.USE_FRONT_CAMERA", true)
-                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
-            },
-        )
+        captureLauncher.launch(openFrontCameraIntent(context, captureFile))
     }
 
     val permissionLauncher =
@@ -306,7 +293,7 @@ fun RecordScreen(
     }
 }
 
-private fun openFrontCameraIntent(context: Context, videoFile: File): Intent {
+private fun openFrontCameraIntent(context: android.content.Context, videoFile: File): Intent {
     val captureUri = FileProvider.getUriForFile(
         context,
         "${context.packageName}.fileprovider",

@@ -40,9 +40,10 @@ import androidx.compose.material3.Slider
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
@@ -62,6 +63,7 @@ import coil.decode.GifDecoder
 import coil.decode.ImageDecoderDecoder
 import com.insighttools.emotioncollector.data.AssetPromptRepository
 import com.insighttools.emotioncollector.data.RecordingStore
+import com.insighttools.emotioncollector.model.PromptMediaType
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -98,6 +100,7 @@ fun RecordScreen(
     var activeRecording by remember { mutableStateOf<Recording?>(null) }
     var isRecording by remember { mutableStateOf(false) }
     var capturedVideoFile by remember { mutableStateOf<File?>(null) }
+    var promptMediaVideoFile by remember { mutableStateOf<File?>(null) }
     var score by remember { mutableFloatStateOf(5f) }
     var saving by remember { mutableStateOf(false) }
     var status by remember { mutableStateOf<String?>(null) }
@@ -110,6 +113,19 @@ fun RecordScreen(
                 status = "需要相机和录音权限才能录制。"
             }
         }
+
+    LaunchedEffect(currentPrompt.mediaAssetPath, currentPrompt.mediaType) {
+        promptMediaVideoFile = null
+        val mediaPath = currentPrompt.mediaAssetPath
+        if (currentPrompt.mediaType == PromptMediaType.VIDEO && mediaPath != null) {
+            promptMediaVideoFile = runCatching {
+                prepareVideoAssetForPlayback(context, mediaPath)
+            }.getOrElse { error ->
+                status = "视频素材加载失败：${error.message}"
+                null
+            }
+        }
+    }
 
     DisposableEffect(previewView, permissionsGranted, lifecycleOwner) {
         val currentPreviewView = previewView
@@ -278,27 +294,78 @@ fun RecordScreen(
             ) {
                 Text(text = "类别：${currentPrompt.category}")
                 Text(text = "表情文件夹：${currentPrompt.memeFolder}")
+                Text(text = "素材：${currentPrompt.mediaAssetPath?.substringAfterLast('/') ?: "未找到"}")
 
-                if (currentPrompt.imageAssetPath != null) {
-                    AsyncImage(
-                        model = "file:///android_asset/${currentPrompt.imageAssetPath}",
-                        imageLoader = imageLoader,
-                        contentDescription = "Emotion",
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(220.dp)
-                            .background(Color(0xFFE3E3E3)),
-                        contentScale = ContentScale.Fit,
-                    )
-                } else {
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(220.dp)
-                            .background(Color(0xFFE3E3E3)),
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        Text("该素材目录下暂未找到 gif/png/jpg/webp")
+                when (currentPrompt.mediaType) {
+                    PromptMediaType.IMAGE -> {
+                        if (currentPrompt.mediaAssetPath != null) {
+                            AsyncImage(
+                                model = "file:///android_asset/${currentPrompt.mediaAssetPath}",
+                                imageLoader = imageLoader,
+                                contentDescription = "Emotion",
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(220.dp)
+                                    .background(Color(0xFFE3E3E3)),
+                                contentScale = ContentScale.Fit,
+                            )
+                        } else {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(220.dp)
+                                    .background(Color(0xFFE3E3E3)),
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                Text("图片素材缺失")
+                            }
+                        }
+                    }
+
+                    PromptMediaType.VIDEO -> {
+                        val mediaFile = promptMediaVideoFile
+                        if (mediaFile != null && mediaFile.exists()) {
+                            AndroidView(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(220.dp),
+                                factory = { viewContext ->
+                                    VideoView(viewContext).apply {
+                                        setVideoURI(mediaFile.toUri())
+                                        setOnPreparedListener { mediaPlayer ->
+                                            mediaPlayer.isLooping = true
+                                            start()
+                                        }
+                                    }
+                                },
+                                update = { view ->
+                                    view.setVideoURI(mediaFile.toUri())
+                                    view.start()
+                                },
+                            )
+                        } else {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(220.dp)
+                                    .background(Color(0xFFE3E3E3)),
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                Text("视频素材加载中...")
+                            }
+                        }
+                    }
+
+                    PromptMediaType.UNKNOWN -> {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(220.dp)
+                                .background(Color(0xFFE3E3E3)),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Text("该目录下未找到 gif/jpg/png/webp/mp4/mov/webm")
+                        }
                     }
                 }
 
@@ -379,6 +446,7 @@ fun RecordScreen(
                 onClick = {
                     capturedVideoFile?.delete()
                     capturedVideoFile = null
+                    promptMediaVideoFile = null
                     score = 5f
                     currentPrompt = promptRepository.getRandomPrompt()
                     status = "已切换到下一条随机素材。"
@@ -435,6 +503,7 @@ fun RecordScreen(
                                 )
                             }
                             capturedVideoFile = null
+                            promptMediaVideoFile = null
                             score = 5f
                             currentPrompt = promptRepository.getRandomPrompt()
                             status = "保存成功，已进入下一条拍摄。"
@@ -474,4 +543,18 @@ private fun hasRequiredPermissions(context: Context): Boolean {
             context,
             Manifest.permission.RECORD_AUDIO,
         ) == PackageManager.PERMISSION_GRANTED
+}
+
+private suspend fun prepareVideoAssetForPlayback(
+    context: Context,
+    assetPath: String,
+): File = withContext(Dispatchers.IO) {
+    val extension = assetPath.substringAfterLast('.', "mp4")
+    val target = File(context.cacheDir, "asset_preview_${assetPath.hashCode()}.$extension")
+    context.assets.open(assetPath).use { input ->
+        target.outputStream().use { output ->
+            input.copyTo(output)
+        }
+    }
+    target
 }

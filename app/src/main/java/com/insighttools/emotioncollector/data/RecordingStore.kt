@@ -23,7 +23,7 @@ class RecordingStore(context: Context) {
         sourceVideoFile.copyTo(videoFile, overwrite = true)
         sourceVideoFile.delete()
 
-        val selectedEmo = prompt.imageAssetPath?.substringAfterLast('/') ?: prompt.memeFolder
+        val selectedEmo = prompt.mediaAssetPath?.substringAfterLast('/') ?: prompt.memeFolder
         val metadataFile = File(metadataDir, "recording_$id.json")
         val json = JSONObject().apply {
             put("selectedemo", selectedEmo)

@@ -2,10 +2,17 @@ package com.insighttools.emotioncollector.model
 
 import java.io.File
 
+enum class PromptMediaType {
+    IMAGE,
+    VIDEO,
+    UNKNOWN,
+}
+
 data class PromptSelection(
     val category: String,
     val memeFolder: String,
-    val imageAssetPath: String?,
+    val mediaAssetPath: String?,
+    val mediaType: PromptMediaType,
     val dialogue: String?,
 )
 

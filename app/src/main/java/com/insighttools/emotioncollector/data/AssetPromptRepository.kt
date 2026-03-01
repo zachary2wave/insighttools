@@ -1,6 +1,7 @@
 package com.insighttools.emotioncollector.data
 
 import android.content.res.AssetManager
+import com.insighttools.emotioncollector.model.PromptMediaType
 import com.insighttools.emotioncollector.model.PromptSelection
 import kotlin.random.Random
 
@@ -11,51 +12,66 @@ class AssetPromptRepository(
     private val random = Random(System.currentTimeMillis())
 
     @Volatile
-    private var cachedPrompts: List<PromptSelection>? = null
+    private var cachedPromptSources: List<PromptSource>? = null
 
     fun getRandomPrompt(): PromptSelection {
-        val prompts = cachedPrompts ?: loadAllPrompts().also { cachedPrompts = it }
-        if (prompts.isEmpty()) {
+        val sources = cachedPromptSources ?: loadPromptSources().also { cachedPromptSources = it }
+        if (sources.isEmpty()) {
             return PromptSelection(
                 category = "placeholder",
                 memeFolder = "placeholder",
-                imageAssetPath = null,
+                mediaAssetPath = null,
+                mediaType = PromptMediaType.UNKNOWN,
                 dialogue = "请先在 assets/emotions 下补充素材目录与台词 CSV。",
             )
         }
-        return prompts[random.nextInt(prompts.size)].let { prompt ->
-            val dialogueChoices = loadDialogues(prompt)
-            if (dialogueChoices.isEmpty()) {
-                prompt.copy(dialogue = null)
-            } else {
-                prompt.copy(dialogue = dialogueChoices[random.nextInt(dialogueChoices.size)])
-            }
+
+        val source = sources[random.nextInt(sources.size)]
+        val mediaCandidates = loadMediaCandidates(source)
+        val media = if (mediaCandidates.isEmpty()) {
+            null
+        } else {
+            mediaCandidates[random.nextInt(mediaCandidates.size)]
         }
+        val dialogues = loadDialogues(source)
+        val dialogue = if (dialogues.isEmpty()) null else dialogues[random.nextInt(dialogues.size)]
+
+        return PromptSelection(
+            category = source.category,
+            memeFolder = source.memeFolder,
+            mediaAssetPath = media?.assetPath,
+            mediaType = media?.type ?: PromptMediaType.UNKNOWN,
+            dialogue = dialogue,
+        )
     }
 
-    private fun loadAllPrompts(): List<PromptSelection> {
-        val results = mutableListOf<PromptSelection>()
+    private fun loadPromptSources(): List<PromptSource> {
+        val results = mutableListOf<PromptSource>()
         val categories = assetManager.list(rootPath).orEmpty().sorted()
         for (category in categories) {
             val categoryPath = "$rootPath/$category"
             val memeFolders = assetManager.list(categoryPath).orEmpty().sorted()
             for (meme in memeFolders) {
-                val memePath = "$categoryPath/$meme"
-                val children = assetManager.list(memePath).orEmpty()
-                val image = children.firstOrNull { it.isImageFile() }?.let { "$memePath/$it" }
-                results += PromptSelection(
-                    category = category,
-                    memeFolder = meme,
-                    imageAssetPath = image,
-                    dialogue = null,
-                )
+                results += PromptSource(category = category, memeFolder = meme)
             }
         }
         return results
     }
 
-    private fun loadDialogues(prompt: PromptSelection): List<String> {
-        val csvPath = "$rootPath/${prompt.category}/${prompt.memeFolder}/dialogue.csv"
+    private fun loadMediaCandidates(source: PromptSource): List<MediaCandidate> {
+        val folderPath = "$rootPath/${source.category}/${source.memeFolder}"
+        val children = assetManager.list(folderPath).orEmpty()
+        return children.mapNotNull { fileName ->
+            val type = fileName.toPromptMediaType() ?: return@mapNotNull null
+            MediaCandidate(
+                assetPath = "$folderPath/$fileName",
+                type = type,
+            )
+        }
+    }
+
+    private fun loadDialogues(source: PromptSource): List<String> {
+        val csvPath = "$rootPath/${source.category}/${source.memeFolder}/dialogue.csv"
         return try {
             assetManager.open(csvPath).bufferedReader().useLines { lines ->
                 lines.map { parseDialogueCell(it) }
@@ -99,12 +115,31 @@ class AssetPromptRepository(
         return result
     }
 
-    private fun String.isImageFile(): Boolean {
+    private fun String.toPromptMediaType(): PromptMediaType? {
         val lower = lowercase()
-        return lower.endsWith(".gif") ||
-            lower.endsWith(".png") ||
-            lower.endsWith(".jpg") ||
-            lower.endsWith(".jpeg") ||
-            lower.endsWith(".webp")
+        return when {
+            lower.endsWith(".gif") ||
+                lower.endsWith(".png") ||
+                lower.endsWith(".jpg") ||
+                lower.endsWith(".jpeg") ||
+                lower.endsWith(".webp") -> PromptMediaType.IMAGE
+
+            lower.endsWith(".mp4") ||
+                lower.endsWith(".m4v") ||
+                lower.endsWith(".webm") ||
+                lower.endsWith(".mov") -> PromptMediaType.VIDEO
+
+            else -> null
+        }
     }
+
+    private data class PromptSource(
+        val category: String,
+        val memeFolder: String,
+    )
+
+    private data class MediaCandidate(
+        val assetPath: String,
+        val type: PromptMediaType,
+    )
 }

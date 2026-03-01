@@ -24,6 +24,9 @@ emotions/
 每个 `meme_name` 目录下建议至少包含：
 
 - `emotion.gif`
+- `emotion.gif.dialog.csv`
 - `emotion.jpg`
+- `emotion.jpg.dialog.csv`
 - `emotion.mp4`
-- `dialogue.csv`
+- `emotion.mp4.dialog.csv`
+- `dialogue.csv`（可选兜底）

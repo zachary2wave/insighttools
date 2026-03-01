@@ -33,7 +33,7 @@ class AssetPromptRepository(
         } else {
             mediaCandidates[random.nextInt(mediaCandidates.size)]
         }
-        val dialogues = loadDialogues(source)
+        val dialogues = loadDialogues(source, media)
         val dialogue = if (dialogues.isEmpty()) null else dialogues[random.nextInt(dialogues.size)]
 
         return PromptSelection(
@@ -64,14 +64,52 @@ class AssetPromptRepository(
         return children.mapNotNull { fileName ->
             val type = fileName.toPromptMediaType() ?: return@mapNotNull null
             MediaCandidate(
+                fileName = fileName,
                 assetPath = "$folderPath/$fileName",
                 type = type,
             )
         }
     }
 
-    private fun loadDialogues(source: PromptSource): List<String> {
-        val csvPath = "$rootPath/${source.category}/${source.memeFolder}/dialogue.csv"
+    private fun loadDialogues(
+        source: PromptSource,
+        media: MediaCandidate?,
+    ): List<String> {
+        val folderPath = "$rootPath/${source.category}/${source.memeFolder}"
+        val children = assetManager.list(folderPath).orEmpty().toSet()
+        val candidateFileNames = buildDialogueCandidateFileNames(media)
+
+        for (fileName in candidateFileNames) {
+            if (fileName !in children) continue
+            val lines = readDialogueLines("$folderPath/$fileName")
+            if (lines.isNotEmpty()) return lines
+        }
+
+        return emptyList()
+    }
+
+    private fun buildDialogueCandidateFileNames(media: MediaCandidate?): List<String> {
+        val candidates = mutableListOf<String>()
+        if (media != null) {
+            val mediaFileName = media.fileName
+            val mediaBaseName = mediaFileName.substringBeforeLast('.')
+            candidates += "$mediaFileName.dialog.csv"
+            candidates += "$mediaFileName.dialogue.csv"
+            candidates += "$mediaFileName.csv"
+            candidates += "$mediaBaseName.dialog.csv"
+            candidates += "$mediaBaseName.dialogue.csv"
+            candidates += "$mediaBaseName.csv"
+            candidates += "dialog_$mediaFileName.csv"
+            candidates += "dialog_$mediaBaseName.csv"
+            candidates += "${mediaBaseName}_dialog.csv"
+            candidates += "${mediaBaseName}_dialogue.csv"
+        }
+        candidates += "dialogue.csv"
+        candidates += "dialog.csv"
+        return candidates.distinct()
+    }
+
+    private fun readDialogueLines(csvPath: String): List<String> {
         return try {
             assetManager.open(csvPath).bufferedReader().useLines { lines ->
                 lines.map { parseDialogueCell(it) }
@@ -139,6 +177,7 @@ class AssetPromptRepository(
     )
 
     private data class MediaCandidate(
+        val fileName: String,
         val assetPath: String,
         val type: PromptMediaType,
     )

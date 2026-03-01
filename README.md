@@ -7,7 +7,7 @@
 1. **录制模式**
    - 从 `assets/emotions` 随机抽取表情素材（类别/子表情目录）。
    - 每次会在该目录中随机选择一个媒体文件（支持 `gif/jpg/png/webp/mp4/mov/webm`）。
-   - 从对应 `dialogue.csv` 随机抽取台词；若无台词则隐藏台词区域。
+   - 随机到某个媒体后，优先读取该媒体对应的 dialog 文件；找不到则回退到 `dialogue.csv`。
    - 使用 CameraX 内嵌前置摄像头实时预览与录制（前摄优先，失败回退后摄）。
    - 录制后用户可预览、0-10 打分，并保存进入下一条。
 
@@ -35,9 +35,12 @@ emotions/
   official_cn14/
     <meme_name(14种情绪之一)>/
       emotion.gif
+      emotion.gif.dialog.csv
       emotion.jpg
+      emotion.jpg.dialog.csv
       emotion.mp4
-      dialogue.csv
+      emotion.mp4.dialog.csv
+      dialogue.csv (可选兜底)
 ```
 
 仓库里已预置你指定的 14 种情绪 `meme_name` 模板（用于快速填充你自己的素材）。

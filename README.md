@@ -32,10 +32,28 @@
 
 ```text
 emotions/
-  <category>/
-    <meme_name>/
-      emotion.gif / emotion.jpg / emotion.mp4
+  official_cn14/
+    <meme_name(14种情绪之一)>/
+      emotion.gif
+      emotion.jpg
+      emotion.mp4
       dialogue.csv
 ```
 
-仓库里已预置 14 类目录模板（用于快速填充你自己的素材）。
+仓库里已预置你指定的 14 种情绪 `meme_name` 模板（用于快速填充你自己的素材）。
+
+14 种情绪如下：
+1. 感冒（打喷嚏，咳嗽，流鼻涕）
+2. 困倦
+3. 疲劳
+4. 专注
+5. 走神/发呆
+6. 挫折/沮丧
+7. 厌倦
+8. 急切/着急
+9. 忧虑/焦虑/压力大
+10. 困惑/疑惑
+11. 紧张
+12. 激动
+13. 感兴趣/好奇
+14. 不耐烦

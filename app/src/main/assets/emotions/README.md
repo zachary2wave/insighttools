@@ -1,6 +1,29 @@
-# 14 类情绪目录模板
+# 14 种情绪模板（meme_name）
 
-当前已预置 14 类目录，每类下有一个 `sample_01/dialogue.csv` 作为示例。
+当前模板采用：
 
-请在每个 `sample_01` 下补充真正的媒体文件（可为 `emotion.gif` / `emotion.jpg` / `emotion.mp4`），
-并按需新增更多表情子目录（如 `sample_02`、`sample_03`）。
+```text
+emotions/
+  official_cn14/
+    01_感冒_打喷嚏_咳嗽_流鼻涕/
+    02_困倦/
+    03_疲劳/
+    04_专注/
+    05_走神_发呆/
+    06_挫折_沮丧/
+    07_厌倦/
+    08_急切_着急/
+    09_忧虑_焦虑_压力大/
+    10_困惑_疑惑/
+    11_紧张/
+    12_激动/
+    13_感兴趣_好奇/
+    14_不耐烦/
+```
+
+每个 `meme_name` 目录下建议至少包含：
+
+- `emotion.gif`
+- `emotion.jpg`
+- `emotion.mp4`
+- `dialogue.csv`

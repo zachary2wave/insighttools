@@ -276,11 +276,6 @@ fun RecordScreen(
             .padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        Text(
-            text = "随机素材",
-            style = MaterialTheme.typography.titleLarge,
-        )
-
         Card(
             colors = CardDefaults.cardColors(
                 containerColor = Color(0xFFF8F7FF),
@@ -292,9 +287,7 @@ fun RecordScreen(
                     .padding(12.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                Text(text = "类别：${currentPrompt.category}")
                 Text(text = "表情文件夹：${currentPrompt.memeFolder}")
-                Text(text = "素材：${currentPrompt.mediaAssetPath?.substringAfterLast('/') ?: "未找到"}")
 
                 when (currentPrompt.mediaType) {
                     PromptMediaType.IMAGE -> {
